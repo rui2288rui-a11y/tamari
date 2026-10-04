@@ -511,6 +511,11 @@ async function renderPosts(username,self){
 }
 function renderProfile(u, acts, ctx = {}) {
   u = u || {};
+  u.layout = Array.isArray(u.layout) ? u.layout : [];
+  u.diaries = Array.isArray(u.diaries) ? u.diaries : [];
+  u.links = Array.isArray(u.links) ? u.links : [];
+  u.connections = Array.isArray(u.connections) ? u.connections : [];
+  u = u || {};
 
   // APIから返ってこない場合でもプロフィール画面を落とさない
   u.diaries = Array.isArray(u.diaries) ? u.diaries : [];
