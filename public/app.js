@@ -509,7 +509,14 @@ async function renderPosts(username,self){
   else posts.forEach(p=>list.append(postCard(p,self,route)));
   box.append(list); return box;
 }
-function renderProfile(u, acts, ctx = {}) { // 保存済みのデータも、編集中のプレビューも、同じ関数で描画します
+function renderProfile(u, acts, ctx = {}) {
+  u = u || {};
+
+  // APIから返ってこない場合でもプロフィール画面を落とさない
+  u.diaries = Array.isArray(u.diaries) ? u.diaries : [];
+  u.links = Array.isArray(u.links) ? u.links : [];
+  u.layout = Array.isArray(u.layout) ? u.layout : [];
+  u.connections = Array.isArray(u.connections) ? u.connections : []; { // 保存済みのデータも、編集中のプレビューも、同じ関数で描画します
   const sec = (id, ...k) => el('section', { class: 'blk' }, el('h3', { class: 'lb' }, LABEL[id]), k);
   const txt = (id, v, cls) => v ? sec(id, el('p', { class: cls || 'tx' }, id === 'likes' || id === 'hobbies' || id === 'interests' ? slash(v) : v)) : null;
   const parts = {
