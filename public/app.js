@@ -1,5 +1,6 @@
 // Tamari 画面(ブラウザ側)。画面の文字はすべて createTextNode で入れるので、悪意ある文字(XSS)は実行されません
 localStorage.setItem('tamari_lang','ja');
+window.TAMARI_APP_FIX = 'v2'; try { console.info('Tamari app.js fix v2 loaded'); } catch (_) {}
 const $ = s => document.querySelector(s);
 const el = (t, p = {}, ...c) => {
   const e = document.createElement(t);
@@ -43,7 +44,7 @@ async function api(url, method = 'GET', body) {
   if (body) { o.headers['Content-Type'] = 'application/json'; o.body = JSON.stringify(body); }
   let r; try { r = await fetch(url, o); } catch (e) { throw new Error('通信できませんでした。ネットワークを確認して、もう一度お試しください'); }
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) { const e = new Error(j.error || 'うまくいきませんでした。もう一度お試しください'); e.status = r.status; throw e; }
+  if (!r.ok) { const e = new Error(j.error || 'うまくいきませんでした。もう一度お試しください'); e.status = r.status; try { console.error('[Tamari API error]', method, url, r.status, j.error || ''); } catch (_) {} throw e; }
   return j;
 }
 // ボタンを押している間は無効にして、連打を防ぐ。失敗したら理由を表示する
@@ -53,7 +54,8 @@ const safe = fn => async (...a) => {
   finally { if (b && b.isConnected) b.disabled = false; }
 };
 const hm = t => new Date(t).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
-const num = n => Number(n).toLocaleString('ja-JP');
+const num = n => (Number(n) || 0).toLocaleString('ja-JP');
+const arr = x => Array.isArray(x) ? x : [];
 const closeD = d => { d.close(); d.remove(); };
 const avatar = (u, big) => el('div', { class: 'av' + (big ? ' l' : '') }, u.avatar ? el('img', { src: u.avatar, alt: '' }) : (u.display || '?').slice(0, 1));
 const logo = () => el('a', { href: '#/', class: 'logo' }, 'Tamari', el('i', {}, '.'));
@@ -95,8 +97,8 @@ function layout() {
 async function renderSide() {
   const h = navOn(location.hash), link = ([href, l]) => el('a', { href, class: href === h ? 'on' : '' }, l);
   bnav.replaceChildren(...NAV.map(link));
-  const chats = await api('/api/chats');
-  const unread = await api('/api/notices').catch(()=>[]);
+  const chats = arr(await api('/api/chats').catch(()=>[]));
+  const unread = arr(await api('/api/notices').catch(()=>[]));
   const mainNav = NAV.filter(([href]) => href !== '#/settings');
   const navItems = mainNav.map(([href,label]) => {
     const a=link([href,label]);
@@ -195,17 +197,18 @@ async function userSearch(q) {
 async function homeSearch(q) {
   try {
     const d = await api('/api/home-search?q=' + encodeURIComponent(q));
-    return { users: Array.isArray(d.users) ? d.users : [], posts: Array.isArray(d.posts) ? d.posts : [] };
+    if (Array.isArray(d)) return { users: d.filter(x => x && !('body' in x) && !('likes' in x)), posts: d.filter(x => x && ('body' in x || 'likes' in x)) };
+    return { users: arr(d && d.users), posts: arr(d && d.posts) };
   } catch (e) {
-    if (e.status !== 404 && e.status !== 405) throw e;
-    const key = q.replace(/^@/, '').toLowerCase();
-    const users = await userSearch(key).catch(() => []);
-    const posts = q.startsWith('@') ? [] : (await api('/api/home-posts').catch(() => [])).filter(p => ((p.body || '') + ' ' + (p.display || '')).toLowerCase().includes(key));
+    if (e.status === 401) throw e;
+    const key = q.replace(/^@/, '').trim().toLowerCase();
+    const users = arr(await userSearch(key).catch(() => []));
+    const posts = q.startsWith('@') ? [] : arr(await api('/api/home-posts').catch(() => [])).filter(p => ((p.body || '') + ' ' + (p.display || '')).toLowerCase().includes(key));
     return { users, posts };
   }
 }
 async function renderHomePosts(){
-  const posts=await api('/api/home-posts').catch(()=>[]); const box=el('div',{class:'home-posts'});
+  const posts=arr(await api('/api/home-posts').catch(()=>[])); const box=el('div',{class:'home-posts'});
   if(!posts.length){ box.append(el('p',{class:'sm2',style:'margin-top:14px'},'今日はまだ投稿がありません。')); return box; }
   posts.forEach((p,i)=>{ const card=el('article',{class:'trending-card',onclick:()=>postDetailDialog(p,home),style:'cursor:pointer'},el('div',{class:'trending-rank'},'#'+(i+1)+'  TODAY'),el('div',{style:'display:flex;align-items:center;gap:10px;margin:10px 0'},el('a',{href:'#/u/'+encodeURIComponent(p.username),onclick:e=>e.stopPropagation(),style:'display:flex;align-items:center'},avatar(p)),el('div',{class:'g'},el('a',{href:'#/u/'+encodeURIComponent(p.username),onclick:e=>e.stopPropagation(),class:'nm',style:'text-decoration:none'},p.display),el('div',{class:'sm2'},'@'+p.username+' ・ '+new Date(p.created).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})))),p.body?el('p',{class:'tx',style:'white-space:pre-wrap'},p.body):null,p.image?el('img',{src:p.image,alt:'投稿画像',style:'width:100%;max-height:420px;object-fit:cover;border-radius:14px;margin-top:10px',loading:'lazy'}):null,p.video?el('video',{src:p.video,controls:'',playsinline:'',style:'width:100%;max-height:420px;border-radius:14px;margin-top:10px'}):null,el('div',{style:'margin-top:12px;color:var(--muted);font-size:13px'},'♡ '+num(p.likes||0)+' ・ '+num((p.replies||[]).length)+' 返信')) ; box.append(card); }); return box;
 }
@@ -247,7 +250,7 @@ async function home() {
 }
 async function notices() {
   curChat = null; document.body.classList.remove('inchat');
-  const ns = await api('/api/notices');
+  const ns = arr(await api('/api/notices'));
   const list = el('div',{class:'notice-list'});
   const openNotice = async n => {
     try { await api('/api/notices/'+n.id+'/read','POST'); } catch(e) {}
@@ -281,7 +284,7 @@ const tags = s => s ? el('div', {}, s.split(/[,、\s]+/).filter(Boolean).slice(0
 // ---------- チャット ----------
 async function chatList() {
   curChat = null;
-  const c = await api('/api/chats');
+  const c = arr(await api('/api/chats'));
   const find = el('button',{class:'acc',onclick:safe(startSearch)},'相手を探す');
   pane.replaceChildren(
     phead('チャット','一時的な会話をここで始められます',find),
@@ -290,7 +293,7 @@ async function chatList() {
 }
 async function chat(id) {
   curChat = +id; let typingTimer=null; let typingShown=null;
-  await api('/api/chats/'+id+'/read','POST').catch(()=>{}); document.body.classList.add('inchat'); const d = await api('/api/chats/' + id); let image = null;
+  await api('/api/chats/'+id+'/read','POST').catch(()=>{}); document.body.classList.add('inchat'); const d = await api('/api/chats/' + id); d.msgs = arr(d.msgs); let image = null;
   const list = el('div', { class: 'msgs' }), pv = el('div', { class: 'pv' });
   const add = m => {
     const mine = m.username === ME.username, meta = el('div', { class: 'meta' }, hm(m.created)), box = el('div', { class: 'msg' + (mine ? ' mine' : ''), 'data-id': m.id }, meta, m.body ? el('div', { class: 'bub' }, m.body) : null);
@@ -337,7 +340,7 @@ const slash = s => String(s || '').split(/[,、\s\/]+/).filter(Boolean).slice(0,
 const left = t => { const h = Math.ceil((t + 864e5 - Date.now()) / 36e5); return h <= 1 ? 'まもなく消えます' : 'あと約' + h + '時間で消えます'; };
 const okLink = l => { try { const x = new URL(l.url); return /^https?:$/.test(x.protocol) ? x : null; } catch (e) { return null; } };
 const DEFAULT_LAYOUT = ['status', 'bio', 'likes', 'hobbies', 'interests', 'quote', 'shot', 'video', 'diary', 'links', 'follow'];
-const fixUser = u => { u = u || {}; if (!Array.isArray(u.layout) || !u.layout.length) u.layout = DEFAULT_LAYOUT.map(id => ({ id, show: true })); if (!Array.isArray(u.links)) u.links = []; if (!Array.isArray(u.diaries)) u.diaries = []; return u; };
+const fixUser = u => { u = u || {}; if (typeof u.layout === 'string') { try { u.layout = JSON.parse(u.layout); } catch (e) { u.layout = null; } } u.layout = Array.isArray(u.layout) ? u.layout.filter(x => x && typeof x === 'object' && x.id).map(x => ({ ...x, show: x.show !== false })) : []; if (!u.layout.length) u.layout = DEFAULT_LAYOUT.map(id => ({ id, show: true })); u.links = arr(u.links); u.diaries = arr(u.diaries); if (u.connections != null && !Array.isArray(u.connections)) u.connections = []; return u; };
 const STAMPS = ['わかる', 'おつかれさま', 'おもしろい', 'ありがとう', 'すごい'];
 function replyDialog(diary, done) { // 日記への「ひとこと」。数は表示されず、日記の持ち主だけが読めます
   let stamp = diary.mine ? diary.mine.stamp : '', dlg;
@@ -386,7 +389,7 @@ function fileData(file){
   });
 }
 async function loadPosts(username){
-  try{return await api('/api/posts?username='+encodeURIComponent(username));}
+  try{return arr(await api('/api/posts?username='+encodeURIComponent(username)));}
   catch(e){toast(e.message);return [];}
 }
 function launchHeartBurst(card){
@@ -536,17 +539,17 @@ function renderProfile(u, acts, ctx = {}) { // 保存済みのデータも、編
     status: () => u.statusLine ? el('p', { class: 'now' }, u.statusLine) : null, bio: () => txt('bio', u.bio), likes: () => txt('likes', u.likes, 'tx sl'), hobbies: () => txt('hobbies', u.hobbies, 'tx sl'), interests: () => txt('interests', u.interests, 'tx sl'), quote: () => txt('quote', u.quote, 'tx sl'),
     shot: () => u.shot ? sec('shot', el('figure', { class: 'shot' }, el('img', { src: u.shot.image, alt: '今日の一枚' }), u.shot.caption ? el('figcaption', {}, u.shot.caption) : null)) : null,
     video: () => u.video ? sec('video', el('video', { class: 'vid', src: u.video, controls: '', preload: 'metadata', playsinline: '' })) : null,
-    diary: () => u.diaries.length ? sec('diary', u.diaries.map(d => el('div', { class: 'dia' }, el('p', { class: 'tx' }, d.body), el('div', { class: 'sm2' }, hm(d.created) + ' ・ ' + left(d.created)),
+    diary: () => arr(u.diaries).length ? sec('diary', arr(u.diaries).map(d => el('div', { class: 'dia' }, el('p', { class: 'tx' }, d.body), el('div', { class: 'sm2' }, hm(d.created) + ' ・ ' + left(d.created)),
       ctx.reply && !u.self ? el('button', { class: 'sub sm', style: 'margin-top:8px', onclick: () => replyDialog(d, ctx.reply) }, d.mine ? 'ひとこと(送信済み・変更する)' : 'ひとこと添える') : null,
       u.self && d.replies && d.replies.length ? el('div', { class: 'rps' }, d.replies.map(r => el('div', { class: 'rp' }, el('a', { href: '#/u/' + r.username, class: 'nm' }, r.display), ' ', r.stamp ? el('span', { class: 'tag' }, r.stamp) : null, r.body ? el('span', {}, r.body) : null,
         ctx.talk ? el('button', { class: 'txt', style: 'margin-left:8px', onclick: () => ctx.talk(r.username) }, 'この人と話す') : null))) : null))) : null,
-    links: () => { const ls = u.links.map(l => [l, okLink(l)]).filter(x => x[1]); return ls.length ? sec('links', ls.map(([l, x]) => el('a', { class: 'lk', href: x.href, target: '_blank', rel: 'noopener noreferrer nofollow ugc' }, el('span', {}, l.title || x.hostname), el('span', { class: 'sm2' }, x.hostname)))) : null; },
-    follow: () => !u.connections || (!u.connections.length && !u.self) ? null : sec('follow', u.connections.length ? u.connections.map(c => el('a', { class: 'lk', href: '#/u/' + c.username }, el('span', {}, c.display), el('span', { class: 'sm2' }, '@' + c.username))) : el('p', { class: 'sm2' }, 'まだつながりがありません。話した相手を「つながる」で追加できます。'), u.self ? el('a', { href: '#/connections', class: 'sm2' }, 'つながりの一覧 →') : null)
+    links: () => { const ls = arr(u.links).map(l => [l, okLink(l)]).filter(x => x[1]); return ls.length ? sec('links', ls.map(([l, x]) => el('a', { class: 'lk', href: x.href, target: '_blank', rel: 'noopener noreferrer nofollow ugc' }, el('span', {}, l.title || x.hostname), el('span', { class: 'sm2' }, x.hostname)))) : null; },
+    follow: () => !Array.isArray(u.connections) || (!u.connections.length && !u.self) ? null : sec('follow', u.connections.length ? u.connections.map(c => el('a', { class: 'lk', href: '#/u/' + c.username }, el('span', {}, c.display), el('span', { class: 'sm2' }, '@' + c.username))) : el('p', { class: 'sm2' }, 'まだつながりがありません。話した相手を「つながる」で追加できます。'), u.self ? el('a', { href: '#/connections', class: 'sm2' }, 'つながりの一覧 →') : null)
   };
   const bg = el('div', { class: 'mebg' }); if (u.bg) bg.style.backgroundImage = 'url("' + u.bg + '")';
   return el('div', { class: 'me', 'data-ac': u.accent || 'gray' }, bg, el('div', { class: 'mescrim' }),
     el('div', { class: 'mebody' }, el('div', { class: 'mh' }, el('div', { class: 'mav' }, u.avatar ? el('img', { src: u.avatar, alt: '' }) : (u.display || '?').slice(0, 1)), el('div', {}, el('h1', {}, u.display), el('div', { class: 'sm2' }, '@' + u.username), el('div',{class:'profile-online'}, u.online ? [el('span',{class:'online-dot'}),'オンライン'] : [el('span',{class:'offline-dot'}),'オフライン']))),
-      u.layout.filter(x => x.show).map(x => parts[x.id] && parts[x.id]()), acts));
+      arr(u.layout).filter(x => x && x.show).map(x => parts[x.id] && parts[x.id]()), acts));
 }
 async function profile(name) {
   curChat = null;
@@ -624,7 +627,7 @@ async function editor() {
   pane.replaceChildren(phead('プロフィールを編集'), el('div', { class: 'edit' }, form, el('div', { class: 'prevw' }, el('div', { class: 'sm2', style: 'padding:10px 20px 0' }, 'プレビュー(保存前の見た目)'), prev)));
 }
 async function connections() {
-  curChat = null; const d = await api('/api/connections');
+  curChat = null; const d = await api('/api/connections'); d.mutual = arr(d && d.mutual); d.mine = arr(d && d.mine);
   pane.replaceChildren(phead('つながり'), el('div', { class: 'page' }, el('h3', { style: 'margin-top:0' }, 'つながり中'), el('p', { class: 'sm2' }, 'お互いに「また話したい」と思っている人です。人数は誰にも表示されません。'),
     d.mutual.length ? d.mutual.map(x => urow(x)) : el('p', { class: 'sm2' }, 'まだいません。話した相手のページで「つながる」を押してみましょう。'),
     el('h3', { style: 'margin-top:30px' }, 'あなたが希望している人'), el('p', { class: 'sm2' }, '相手には通知されていません。相手も「つながる」を押すと成立します。'),
@@ -633,7 +636,7 @@ async function connections() {
 
 // ---------- 設定 ----------
 async function settings() {
-  curChat = null; const bl = await api('/api/blocks');
+  curChat = null; const bl = arr(await api('/api/blocks'));
   const setTheme = t => { if (t) { document.documentElement.dataset.theme = t; localStorage.setItem('tamari_theme', t); } else { delete document.documentElement.dataset.theme; localStorage.removeItem('tamari_theme'); } };
   const inbox = el('select', { 'aria-label': '話しかけの受け付け' }, [['all', 'だれでも話しかけられる'], ['mutual', 'つながりのある人だけ'], ['off', '話しかけを受け付けない']].map(([v, l]) => el('option', { value: v }, l)));
   inbox.value = ME.inbox || 'all'; inbox.onchange = safe(async () => { await api('/api/settings', 'PUT', { inbox: inbox.value }); ME.inbox = inbox.value; toast('保存しました'); });
