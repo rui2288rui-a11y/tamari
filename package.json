@@ -6,6 +6,7 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@vercel/node": "^20.0.0",
     "pg": "^8.16.3"
   }
 }
