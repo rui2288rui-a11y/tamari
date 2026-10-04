@@ -1,0 +1,8 @@
+tamari.db
+tamari.db-*
+tamari_backup.db
+uploads/
+.env
+server_before_supabase.js
+migrate.js
+checksupabase.js
