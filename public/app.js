@@ -8,7 +8,7 @@ const el = (t, p = {}, ...c) => {
     else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
     else if (v !== false && v != null) e.setAttribute(k, v);
   }
-  for (const x of c.flat()) if (x != null && x !== false) e.append(x.nodeType ? x : document.createTextNode(x));
+  for (const x of c.flat(Infinity)) if (x != null && x !== false) e.append(x.nodeType ? x : document.createTextNode(x));
   return e;
 };
 const app = $('#app');
@@ -58,7 +58,12 @@ const closeD = d => { d.close(); d.remove(); };
 const avatar = (u, big) => el('div', { class: 'av' + (big ? ' l' : '') }, u.avatar ? el('img', { src: u.avatar, alt: '' }) : (u.display || '?').slice(0, 1));
 const logo = () => el('a', { href: '#/', class: 'logo' }, 'Tamari', el('i', {}, '.'));
 const liveLine = () => { const en=(localStorage.getItem('tamari_lang')||'ja')==='en'; return el('span', {}, en?'Currently ': '現在 ', el('b', { 'data-s': 'online' }, ST ? num(ST.online) : '-'), en?' people online · Messages exchanged on Tamari: ':'人がオンライン ・ Tamariで交わされたメッセージ ', el('b', { 'data-s': 'total' }, ST ? num(ST.total) : '-'), en?'':'件'); };
-const paintStats = () => { if (ST) document.querySelectorAll('[data-s]').forEach(e => { e.textContent = num(ST[e.dataset.s]); }); };
+const paintStats = () => { if (ST) document.querySelectorAll('[data-s]').forEach(e => { const v = ST[e.dataset.s]; if (v != null) e.textContent = num(v); }); };
+// 人数・件数は /api/live(SSE)だけに頼らず、/api/stats からも取得して表示する
+let statsTimer = null;
+const refreshStats = async () => { try { const r = await fetch('/api/stats'); if (!r.ok) return; const j = await r.json(); if (j && typeof j === 'object') { ST = j; paintStats(); } } catch (e) {} };
+// 入力中(プロフィール編集・ホーム検索・ダイアログ)の画面を、自動の読み込み直しで消さないための判定
+const busyInput = () => location.hash === '#/edit' || !!document.querySelector('dialog[open]') || !!(document.querySelector('.user-search-input') && document.querySelector('.user-search-input').value.trim());
 function openForm(kind) { const u = kind === 'report' ? CFG.reportUrl : CFG.contactUrl; if (!u) return toast('フォームは準備中です。もう少しお待ちください'); window.open(u, '_blank', 'noopener'); }
 const formLinks = () => el('div', { class: 'foot' }, [['terms', '利用規約'], ['guideline', 'ガイドライン'], ['privacy', 'プライバシー'], ['operator', '運営者情報']].map(([k, l]) => el('a', { href: '/rules.html#' + k }, l)), el('a', { href: '#', onclick: e => { e.preventDefault(); openForm('contact'); } }, 'お問い合わせ'));
 const loadingEl = () => el('div', { class: 'load', role: 'status' }, '読み込んでいます…');
@@ -118,8 +123,8 @@ const phead = (title, sub, right) => el('div', { class: 'phead' }, el('button', 
 const urow = (x, extra) => el('div', { class: 'row', style: 'cursor:default' }, el('a', { href: '#/u/' + x.username, style: 'display:flex;gap:12px;align-items:center;flex:1;min-width:0;text-decoration:none' }, avatar(x), el('div', { class: 'g' }, el('div', { class: 'nm' }, x.display), el('div', { class: 'sm2' }, '@' + x.username))), extra);
 function connect() {
   if (es) es.close(); es = new EventSource('/api/live');
-  es.onopen = () => { if (opened && ME) route(); opened = true; }; // つながり直したときは、いまの画面を読み込み直す
-  es.addEventListener('stats', e => { ST = JSON.parse(e.data); paintStats(); });
+  es.onopen = () => { refreshStats(); if (opened && ME) { if (busyInput()) renderSide().catch(() => {}); else route(); } opened = true; }; // つながり直したときは、いまの画面を読み込み直す
+  es.addEventListener('stats', e => { try { ST = JSON.parse(e.data); paintStats(); } catch (err) {} });
   es.addEventListener('matched', e => {
     // matched は検索開始直後に届くことがあるため、イベントを捨てない。
     // ただし別画面へ移動済みなら、その画面を勝手に上書きしない。
@@ -160,7 +165,7 @@ function connect() {
       return;
     }
     toast(noticeText(n));
-    if ((location.hash === '' || location.hash === '#/') && !searching && !curMatch) home();
+    if ((location.hash === '' || location.hash === '#/') && !searching && !curMatch && !busyInput()) home();
   });
 }
 const noticeText = n => n.kind === 'connect_request' ? n.display + 'さんから「つながりたい」が届きました' : n.kind === 'connected' ? n.display + 'さんとつながりました' : n.kind === 'talk' ? n.display + 'さんが話しかけています' : n.kind === 'postlike' ? '♡ ' + n.display + 'さんがあなたの投稿に反応しました' : n.kind === 'postreply' ? '返信 ' + n.display + 'さんがあなたの投稿に返信しました' : n.kind === 'replylike' ? '♡ ' + n.display + 'さんがあなたの返信に反応しました' : n.display + 'さんが日記にひとこと残しました';
@@ -184,7 +189,20 @@ const startSearch = async () => {
 };
 async function userSearch(q) {
   const results = await api('/api/users/search?q=' + encodeURIComponent(q));
-  return results;
+  return Array.isArray(results) ? results : (results.users || []);
+}
+// ホーム検索。/api/home-search が使えないときは、ユーザー検索+今日の投稿の絞り込みで代用する
+async function homeSearch(q) {
+  try {
+    const d = await api('/api/home-search?q=' + encodeURIComponent(q));
+    return { users: Array.isArray(d.users) ? d.users : [], posts: Array.isArray(d.posts) ? d.posts : [] };
+  } catch (e) {
+    if (e.status !== 404 && e.status !== 405) throw e;
+    const key = q.replace(/^@/, '').toLowerCase();
+    const users = await userSearch(key).catch(() => []);
+    const posts = q.startsWith('@') ? [] : (await api('/api/home-posts').catch(() => [])).filter(p => ((p.body || '') + ' ' + (p.display || '')).toLowerCase().includes(key));
+    return { users, posts };
+  }
 }
 async function renderHomePosts(){
   const posts=await api('/api/home-posts').catch(()=>[]); const box=el('div',{class:'home-posts'});
@@ -200,7 +218,7 @@ async function home() {
     const q = input.value.trim();
     if(!q){ results.replaceChildren(el('p',{class:'sm2'},'ユーザー名は @、投稿はキーワードから検索できます。')); return; }
     try{
-      const data=await api('/api/home-search?q='+encodeURIComponent(q));
+      const data=await homeSearch(q);
       const nodes=[];
       if(data.users.length){ nodes.push(el('h3',{},'ユーザー')); data.users.forEach(u=>nodes.push(urow(u))); }
       if(data.posts.length){
@@ -318,6 +336,8 @@ const LABEL = { bio: '自己紹介', likes: '好きなもの', hobbies: '趣味'
 const slash = s => String(s || '').split(/[,、\s\/]+/).filter(Boolean).slice(0, 12).join(' / ');
 const left = t => { const h = Math.ceil((t + 864e5 - Date.now()) / 36e5); return h <= 1 ? 'まもなく消えます' : 'あと約' + h + '時間で消えます'; };
 const okLink = l => { try { const x = new URL(l.url); return /^https?:$/.test(x.protocol) ? x : null; } catch (e) { return null; } };
+const DEFAULT_LAYOUT = ['status', 'bio', 'likes', 'hobbies', 'interests', 'quote', 'shot', 'video', 'diary', 'links', 'follow'];
+const fixUser = u => { u = u || {}; if (!Array.isArray(u.layout) || !u.layout.length) u.layout = DEFAULT_LAYOUT.map(id => ({ id, show: true })); if (!Array.isArray(u.links)) u.links = []; if (!Array.isArray(u.diaries)) u.diaries = []; return u; };
 const STAMPS = ['わかる', 'おつかれさま', 'おもしろい', 'ありがとう', 'すごい'];
 function replyDialog(diary, done) { // 日記への「ひとこと」。数は表示されず、日記の持ち主だけが読めます
   let stamp = diary.mine ? diary.mine.stamp : '', dlg;
@@ -530,7 +550,7 @@ function renderProfile(u, acts, ctx = {}) { // 保存済みのデータも、編
 }
 async function profile(name) {
   curChat = null;
-  const u = await api('/api/user/' + encodeURIComponent(name));
+  const u = fixUser(await api('/api/user/' + encodeURIComponent(name)));
   const reload = () => route();
   const talk = safe(async uname => {
     const c = await api('/api/chats/open', 'POST', { username: uname });
@@ -566,13 +586,13 @@ async function profile(name) {
 }
 // ---------- プロフィール編集(右側にプレビュー) ----------
 async function editor() {
-  curChat = null; const u = await api('/api/user/' + ME.username), view = { ...u };
+  curChat = null; const u = fixUser(await api('/api/user/' + ME.username)), view = { ...u };
   const D = { display: u.display, statusLine: u.statusLine, bio: u.bio, likes: u.likes, hobbies: u.hobbies, interests: u.interests, quote: u.quote, accent: u.accent, layout: u.layout.map(x => ({ ...x })), links: u.links.map(l => ({ title: l.title, url: l.url })), homeVisible: u.homeVisible !== false };
   const prev = el('div'), draw = () => prev.replaceChildren(renderProfile({ ...view, ...D, self: true }));
   const fld = (label, key, max, ph, ta) => { const i = ta ? el('textarea', { maxlength: max, rows: 3, placeholder: ph || '' }) : el('input', { maxlength: max, placeholder: ph || '' }); i.value = D[key] || ''; i.addEventListener('input', () => { D[key] = i.value; draw(); }); return [el('label', {}, label), i]; };
   const pick = (mb, cb, accept = 'image/png,image/jpeg,image/gif,image/webp') => { const f = el('input', { type: 'file', accept, hidden: '' }); f.onchange = () => { const x = f.files[0]; f.remove(); if (!x) return; if (x.size > mb * 1048576) return toast('ファイルは' + mb + 'MB以下にしてください'); cb(x); }; document.body.append(f); f.click(); };
   const readData = (x, cb) => { const fr = new FileReader(); fr.onload = safe(() => cb(fr.result)); fr.onerror = () => toast('画像を読み込めませんでした。別の画像でお試しください'); fr.readAsDataURL(x); };
-  const reload = async () => { Object.assign(view, await api('/api/user/' + ME.username)); draw(); };
+  const reload = async () => { Object.assign(view, fixUser(await api('/api/user/' + ME.username))); draw(); };
   const setImg = (kind, mb) => () => pick(mb, x => readData(x, async d => { await api('/api/me/image', 'PUT', { kind, image: d }); await reload(); toast('画像を変更しました'); }));
   const delImg = kind => safe(async () => { await api('/api/me/image', 'PUT', { kind, image: '' }); await reload(); });
   const setVideo = () => pick(10, async x => {
@@ -655,6 +675,7 @@ async function route() {
 async function boot() {
   try { ME = await api('/api/me'); } catch (e) { return landing(); }
   CFG = await fetch('/api/config').then(r => r.json()).catch(() => CFG); layout(); connect(); route();
+  refreshStats(); clearInterval(statsTimer); statsTimer = setInterval(() => { if (ME) refreshStats(); }, 30000);
 }
 window.addEventListener('hashchange', route);
 boot();
