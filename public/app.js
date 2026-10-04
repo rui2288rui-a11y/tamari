@@ -665,8 +665,49 @@ async function route() {
   finally { clearTimeout(slow); applyLanguage(); }
 }
 async function boot() {
-  try { ME = await api('/api/me'); } catch (e) { return landing(); }
-  CFG = await fetch('/api/config').then(r => r.json()).catch(() => CFG); layout(); connect(); route();
+  try {
+    // 先に画面の基本構造を作る
+    layout();
+
+    // 接続処理を開始
+    connect();
+
+    // ログイン状態の確認
+    ME = await Promise.race([
+      api('/api/me'),
+      new Promise((_, reject) =>
+        setTimeout(() => {
+          const e = new Error('サーバーへの接続がタイムアウトしました');
+          e.code = 'TIMEOUT';
+          reject(e);
+        }, 8000)
+      )
+    ]);
+
+    // 設定は後から読み込む
+    fetch('/api/config')
+      .then(r => r.ok ? r.json() : null)
+      .then(cfg => {
+        if (cfg) CFG = cfg;
+        applyLanguage();
+      })
+      .catch(err => {
+        console.warn('[CONFIG ERROR]', err);
+      });
+
+    // メイン画面を表示
+    await route();
+
+  } catch (e) {
+    console.error('[BOOT ERROR]', e);
+
+    try {
+      landing();
+    } catch (landingError) {
+      console.error('[LANDING ERROR]', landingError);
+    }
+  }
 }
+
 window.addEventListener('hashchange', route);
 boot();
