@@ -57,7 +57,7 @@ const hm = t => new Date(t).toLocaleTimeString('ja-JP', { hour: '2-digit', minut
 const num = n => (Number(n) || 0).toLocaleString('ja-JP');
 const arr = x => Array.isArray(x) ? x : [];
 const closeD = d => { d.close(); d.remove(); };
-const avatar = (u, big) => el('div', { class: 'av' + (big ? ' l' : '') }, u.avatar ? el('img', { src: u.avatar, alt: '' }) : (u.display || '?').slice(0, 1));
+const avatar = (u, big) => el('div', { class: 'av' + (big ? ' l' : '') }, u.avatar ? el('img', { src: u.avatar, alt: '' }) : (u.display || u.username || '?').slice(0, 1));
 const logo = () => el('a', { href: '#/', class: 'logo' }, 'Tamari', el('i', {}, '.'));
 const liveLine = () => { const en=(localStorage.getItem('tamari_lang')||'ja')==='en'; return el('span', {}, en?'Currently ': '現在 ', el('b', { 'data-s': 'online' }, ST ? num(ST.online) : '-'), en?' people online · Messages exchanged on Tamari: ':'人がオンライン ・ Tamariで交わされたメッセージ ', el('b', { 'data-s': 'total' }, ST ? num(ST.total) : '-'), en?'':'件'); };
 const paintStats = () => { if (ST) document.querySelectorAll('[data-s]').forEach(e => { const v = ST[e.dataset.s]; if (v != null) e.textContent = num(v); }); };
@@ -75,7 +75,21 @@ async function landing(tab = 'new') {
   if (es) { es.close(); es = null; } opened = false; searching = false; curMatch = null; document.body.classList.remove('inchat');
   [ST, CFG] = await Promise.all([fetch('/api/stats').then(r => r.json()).catch(() => null), fetch('/api/config').then(r => r.json()).catch(() => CFG)]);
   const u = el('input', { maxlength: 16, autocapitalize: 'none', autocomplete: 'username', placeholder: 'tamari_taro' }), p = el('input', { type: 'password', autocomplete: tab === 'new' ? 'new-password' : 'current-password', placeholder: '8文字以上' }), d = el('input', { maxlength: 20, placeholder: 'たまり太郎' });
-  const go = safe(async () => { await api(tab === 'new' ? '/api/register' : '/api/login', 'POST', { username: u.value, display: d.value, password: p.value }); boot(); });
+  const go = safe(async () => {
+    const uname = u.value.trim(), dname = d.value.trim() || uname;
+    await api(tab === 'new' ? '/api/register' : '/api/login', 'POST', { username: uname, display: dname, password: p.value });
+    if (tab === 'new') {
+      // 登録で入力した表示名を、プロフィールにも保存しておく(@ユーザー名はそのまま表示される)
+      try {
+        const me = await api('/api/me'), pu = fixUser(await api('/api/user/' + encodeURIComponent(me.username)));
+        if (!pu.display || pu.display === pu.username || pu.display !== dname) {
+          await api('/api/profile', 'PUT', { display: dname, statusLine: pu.statusLine || '', bio: pu.bio || '', likes: pu.likes || '', hobbies: pu.hobbies || '', interests: pu.interests || '', quote: pu.quote || '', accent: pu.accent || 'gray', layout: pu.layout, links: pu.links.map(l => ({ title: l.title, url: l.url })), homeVisible: pu.homeVisible !== false });
+        }
+      } catch (e) {}
+      location.hash = '#/edit'; // 登録直後は、そのままプロフィール作成画面へ
+    }
+    await boot();
+  });
   p.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
   app.replaceChildren(el('div', { class: 'land' }, logo(), el('h1', {}, '話したい相手を、', el('br'), 'すぐ見つけられる。'),
     el('p', { class: 'sm2' }, 'プロフィールを作って「相手を探す」を押すだけ。メールも電話番号も要りません。'), el('p', { class: 'sm2' }, liveLine()),
@@ -340,7 +354,7 @@ const slash = s => String(s || '').split(/[,、\s\/]+/).filter(Boolean).slice(0,
 const left = t => { const h = Math.ceil((t + 864e5 - Date.now()) / 36e5); return h <= 1 ? 'まもなく消えます' : 'あと約' + h + '時間で消えます'; };
 const okLink = l => { try { const x = new URL(l.url); return /^https?:$/.test(x.protocol) ? x : null; } catch (e) { return null; } };
 const DEFAULT_LAYOUT = ['status', 'bio', 'likes', 'hobbies', 'interests', 'quote', 'shot', 'video', 'diary', 'links', 'follow'];
-const fixUser = u => { u = u || {}; if (typeof u.layout === 'string') { try { u.layout = JSON.parse(u.layout); } catch (e) { u.layout = null; } } u.layout = Array.isArray(u.layout) ? u.layout.filter(x => x && typeof x === 'object' && x.id).map(x => ({ ...x, show: x.show !== false })) : []; if (!u.layout.length) u.layout = DEFAULT_LAYOUT.map(id => ({ id, show: true })); u.links = arr(u.links); u.diaries = arr(u.diaries); if (u.connections != null && !Array.isArray(u.connections)) u.connections = []; return u; };
+const fixUser = u => { u = u || {}; if (!u.display && u.username) u.display = u.username; if (typeof u.layout === 'string') { try { u.layout = JSON.parse(u.layout); } catch (e) { u.layout = null; } } u.layout = Array.isArray(u.layout) ? u.layout.filter(x => x && typeof x === 'object' && x.id).map(x => ({ ...x, show: x.show !== false })) : []; if (!u.layout.length) u.layout = DEFAULT_LAYOUT.map(id => ({ id, show: true })); u.links = arr(u.links); u.diaries = arr(u.diaries); if (u.connections != null && !Array.isArray(u.connections)) u.connections = []; return u; };
 const STAMPS = ['わかる', 'おつかれさま', 'おもしろい', 'ありがとう', 'すごい'];
 function replyDialog(diary, done) { // 日記への「ひとこと」。数は表示されず、日記の持ち主だけが読めます
   let stamp = diary.mine ? diary.mine.stamp : '', dlg;
@@ -548,12 +562,15 @@ function renderProfile(u, acts, ctx = {}) { // 保存済みのデータも、編
   };
   const bg = el('div', { class: 'mebg' }); if (u.bg) bg.style.backgroundImage = 'url("' + u.bg + '")';
   return el('div', { class: 'me', 'data-ac': u.accent || 'gray' }, bg, el('div', { class: 'mescrim' }),
-    el('div', { class: 'mebody' }, el('div', { class: 'mh' }, el('div', { class: 'mav' }, u.avatar ? el('img', { src: u.avatar, alt: '' }) : (u.display || '?').slice(0, 1)), el('div', {}, el('h1', {}, u.display), el('div', { class: 'sm2' }, '@' + u.username), el('div',{class:'profile-online'}, u.online ? [el('span',{class:'online-dot'}),'オンライン'] : [el('span',{class:'offline-dot'}),'オフライン']))),
+    el('div', { class: 'mebody' }, el('div', { class: 'mh' }, el('div', { class: 'mav' }, u.avatar ? el('img', { src: u.avatar, alt: '' }) : (u.display || u.username || '?').slice(0, 1)), el('div', {}, el('h1', {}, u.display || u.username), el('div', { class: 'sm2' }, '@' + u.username), el('div',{class:'profile-online'}, u.online ? [el('span',{class:'online-dot'}),'オンライン'] : [el('span',{class:'offline-dot'}),'オフライン']))),
       arr(u.layout).filter(x => x && x.show).map(x => parts[x.id] && parts[x.id]()), acts));
 }
+const profileBlank = u => !(u.statusLine || u.bio || u.likes || u.hobbies || u.interests || u.quote || u.avatar || u.bg || u.shot || u.video || (u.links && u.links.length) || (u.diaries && u.diaries.length));
+const profileDoneKey = n => 'tamari_profile_done_' + n;
 async function profile(name) {
   curChat = null;
   const u = fixUser(await api('/api/user/' + encodeURIComponent(name)));
+  if (u.self && location.hash === '#/me' && profileBlank(u) && !localStorage.getItem(profileDoneKey(u.username))) { location.hash = '#/edit'; return; }
   const reload = () => route();
   const talk = safe(async uname => {
     const c = await api('/api/chats/open', 'POST', { username: uname });
@@ -579,6 +596,7 @@ async function profile(name) {
       )
     );
   }
+  if (u.self) acts = el('div', { class: 'mact' }, el('button', { class: 'acc', onclick: () => { location.hash = '#/edit'; } }, 'プロフィールを編集'));
   const base=renderProfile(u, acts, { reply: reload, talk: n => talk(n) });
   const posts=await renderPosts(u.username,u.self);
   pane.replaceChildren(
@@ -590,7 +608,7 @@ async function profile(name) {
 // ---------- プロフィール編集(右側にプレビュー) ----------
 async function editor() {
   curChat = null; const u = fixUser(await api('/api/user/' + ME.username)), view = { ...u };
-  const D = { display: u.display, statusLine: u.statusLine, bio: u.bio, likes: u.likes, hobbies: u.hobbies, interests: u.interests, quote: u.quote, accent: u.accent, layout: u.layout.map(x => ({ ...x })), links: u.links.map(l => ({ title: l.title, url: l.url })), homeVisible: u.homeVisible !== false };
+  const D = { display: u.display || ME.display || ME.username, statusLine: u.statusLine, bio: u.bio, likes: u.likes, hobbies: u.hobbies, interests: u.interests, quote: u.quote, accent: u.accent, layout: u.layout.map(x => ({ ...x })), links: u.links.map(l => ({ title: l.title, url: l.url })), homeVisible: u.homeVisible !== false };
   const prev = el('div'), draw = () => prev.replaceChildren(renderProfile({ ...view, ...D, self: true }));
   const fld = (label, key, max, ph, ta) => { const i = ta ? el('textarea', { maxlength: max, rows: 3, placeholder: ph || '' }) : el('input', { maxlength: max, placeholder: ph || '' }); i.value = D[key] || ''; i.addEventListener('input', () => { D[key] = i.value; draw(); }); return [el('label', {}, label), i]; };
   const pick = (mb, cb, accept = 'image/png,image/jpeg,image/gif,image/webp') => { const f = el('input', { type: 'file', accept, hidden: '' }); f.onchange = () => { const x = f.files[0]; f.remove(); if (!x) return; if (x.size > mb * 1048576) return toast('ファイルは' + mb + 'MB以下にしてください'); cb(x); }; document.body.append(f); f.click(); };
@@ -622,7 +640,7 @@ async function editor() {
     el('h3', {}, '動画(MP4・30秒まで・10MBまで)'), el('div', { class: 'row2' }, el('button', { class: 'sub sm', onclick: setVideo }, '動画を選ぶ'), el('button', { class: 'sub sm', onclick: safe(async () => { await api('/api/me/video', 'DELETE'); await reload(); }) }, '削除')),
     el('h3', {}, 'きょうの一枚(その日だけ表示。日付が変わると消えます)'), cap, el('div', { class: 'row2' }, el('button', { class: 'sub sm', onclick: () => pick(2, x => readData(x, async d => { await api('/api/shot', 'POST', { image: d, caption: cap.value }); await reload(); toast('今日の一枚を更新しました'); })) }, '写真を選ぶ'), el('button', { class: 'sub sm', onclick: safe(async () => { await api('/api/shot', 'DELETE'); await reload(); }) }, '削除')),
     el('h3', {}, '今日の日記(24時間で消えます。いつでも削除できます)'), diaIn, el('button', { class: 'sub sm', onclick: safe(async () => { await api('/api/diary', 'POST', { body: diaIn.value }); diaIn.value = ''; await reload(); drawDia(); }) }, '日記を追加'), diaList,
-    el('div', { class: 'row2', style: 'margin-top:30px' }, el('button', { class: 'acc', onclick: safe(async () => { await api('/api/profile', 'PUT', D); ME = await api('/api/me'); toast('保存しました'); renderSide().catch(() => {}); location.hash = '#/me'; }) }, '保存して公開'), el('button', { class: 'sub', onclick: () => { location.hash = '#/me'; } }, 'やめる')));
+    el('div', { class: 'row2', style: 'margin-top:30px' }, el('button', { class: 'acc', onclick: safe(async () => { await api('/api/profile', 'PUT', D); try { localStorage.setItem(profileDoneKey(ME.username), '1'); } catch (e) {} ME = await api('/api/me'); toast('保存しました'); renderSide().catch(() => {}); location.hash = '#/me'; }) }, '保存して公開'), el('button', { class: 'sub', onclick: () => { location.hash = '#/me'; } }, 'やめる')));
   drawLinks(); drawLay(); drawDia(); draw();
   pane.replaceChildren(phead('プロフィールを編集'), el('div', { class: 'edit' }, form, el('div', { class: 'prevw' }, el('div', { class: 'sm2', style: 'padding:10px 20px 0' }, 'プレビュー(保存前の見た目)'), prev)));
 }
