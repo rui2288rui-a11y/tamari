@@ -509,7 +509,7 @@ async function renderPosts(username,self){
   else posts.forEach(p=>list.append(postCard(p,self,route)));
   box.append(list); return box;
 }
-function renderProfile(u, acts, ctx = {})// 保存済みのデータも、編集中のプレビューも、同じ関数で描画します
+function renderProfile(u, acts, ctx = {}) { // 保存済みのデータも、編集中のプレビューも、同じ関数で描画します
   const sec = (id, ...k) => el('section', { class: 'blk' }, el('h3', { class: 'lb' }, LABEL[id]), k);
   const txt = (id, v, cls) => v ? sec(id, el('p', { class: cls || 'tx' }, id === 'likes' || id === 'hobbies' || id === 'interests' ? slash(v) : v)) : null;
   const parts = {
@@ -646,8 +646,7 @@ async function route() {
     else if (h === '#/connections') await connections();
     else if (h === '#/edit') await editor();
     else if (h === '#/settings') await settings();
-    else if
-boot() (curMatch || searching) { /* 相手探しの画面はそのまま */ if (searching) searchView(); }
+    else if (curMatch || searching) { /* 相手探しの画面はそのまま */ if (searching) searchView(); }
     else await home();
     if (!h.startsWith('#/chat/')) pane.scrollTop = 0;
   } catch (e) { toast(e.message); if (e.status === 401) { ME = null; landing(); } else if (h !== '' && h !== '#/') location.hash = '#/'; }
@@ -657,4 +656,5 @@ async function boot() {
   try { ME = await api('/api/me'); } catch (e) { return landing(); }
   CFG = await fetch('/api/config').then(r => r.json()).catch(() => CFG); layout(); connect(); route();
 }
-window.addEventListener('hashchange', route);;
+window.addEventListener('hashchange', route);
+boot();
