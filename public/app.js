@@ -533,7 +533,7 @@ function renderProfile(u, acts, ctx = {}) {
   const bg = el('div', { class: 'mebg' }); if (u.bg) bg.style.backgroundImage = 'url("' + u.bg + '")';
   return el('div', { class: 'me', 'data-ac': u.accent || 'gray' }, bg, el('div', { class: 'mescrim' }),
     el('div', { class: 'mebody' }, el('div', { class: 'mh' }, el('div', { class: 'mav' }, u.avatar ? el('img', { src: u.avatar, alt: '' }) : (u.display || '?').slice(0, 1)), el('div', {}, el('h1', {}, u.display), el('div', { class: 'sm2' }, '@' + u.username), el('div',{class:'profile-online'}, u.online ? [el('span',{class:'online-dot'}),'オンライン'] : [el('span',{class:'offline-dot'}),'オフライン']))),
-      u.layout.filter(x => x.show).map(x => parts[x.id] && parts[x.id]()), acts));
+      (Array.isArray(u.layout) ? u.layout : []).filter(x => x.show).map(x => parts[x.id] && parts[x.id]()), acts));
 }
 async function profile(name) {
   curChat = null;
