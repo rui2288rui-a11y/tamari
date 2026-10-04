@@ -509,19 +509,7 @@ async function renderPosts(username,self){
   else posts.forEach(p=>list.append(postCard(p,self,route)));
   box.append(list); return box;
 }
-function renderProfile(u, acts, ctx = {}) {
-  u = u || {};
-  u.layout = Array.isArray(u.layout) ? u.layout : [];
-  u.diaries = Array.isArray(u.diaries) ? u.diaries : [];
-  u.links = Array.isArray(u.links) ? u.links : [];
-  u.connections = Array.isArray(u.connections) ? u.connections : [];
-  u = u || {};
-
-  // APIから返ってこない場合でもプロフィール画面を落とさない
-  u.diaries = Array.isArray(u.diaries) ? u.diaries : [];
-  u.links = Array.isArray(u.links) ? u.links : [];
-  u.layout = Array.isArray(u.layout) ? u.layout : [];
-  u.connections = Array.isArray(u.connections) ? u.connections : [];// 保存済みのデータも、編集中のプレビューも、同じ関数で描画します
+function renderProfile(u, acts, ctx = {}) { // 保存済みのデータも、編集中のプレビューも、同じ関数で描画します
   const sec = (id, ...k) => el('section', { class: 'blk' }, el('h3', { class: 'lb' }, LABEL[id]), k);
   const txt = (id, v, cls) => v ? sec(id, el('p', { class: cls || 'tx' }, id === 'likes' || id === 'hobbies' || id === 'interests' ? slash(v) : v)) : null;
   const parts = {
@@ -538,7 +526,7 @@ function renderProfile(u, acts, ctx = {}) {
   const bg = el('div', { class: 'mebg' }); if (u.bg) bg.style.backgroundImage = 'url("' + u.bg + '")';
   return el('div', { class: 'me', 'data-ac': u.accent || 'gray' }, bg, el('div', { class: 'mescrim' }),
     el('div', { class: 'mebody' }, el('div', { class: 'mh' }, el('div', { class: 'mav' }, u.avatar ? el('img', { src: u.avatar, alt: '' }) : (u.display || '?').slice(0, 1)), el('div', {}, el('h1', {}, u.display), el('div', { class: 'sm2' }, '@' + u.username), el('div',{class:'profile-online'}, u.online ? [el('span',{class:'online-dot'}),'オンライン'] : [el('span',{class:'offline-dot'}),'オフライン']))),
-      (Array.isArray(u.layout) ? u.layout : []).filter(x => x.show).map(x => parts[x.id] && parts[x.id]()), acts));
+      u.layout.filter(x => x.show).map(x => parts[x.id] && parts[x.id]()), acts));
 }
 async function profile(name) {
   curChat = null;
@@ -665,49 +653,8 @@ async function route() {
   finally { clearTimeout(slow); applyLanguage(); }
 }
 async function boot() {
-  try {
-    // 先に画面の基本構造を作る
-    layout();
-
-    // 接続処理を開始
-    connect();
-
-    // ログイン状態の確認
-    ME = await Promise.race([
-      api('/api/me'),
-      new Promise((_, reject) =>
-        setTimeout(() => {
-          const e = new Error('サーバーへの接続がタイムアウトしました');
-          e.code = 'TIMEOUT';
-          reject(e);
-        }, 8000)
-      )
-    ]);
-
-    // 設定は後から読み込む
-    fetch('/api/config')
-      .then(r => r.ok ? r.json() : null)
-      .then(cfg => {
-        if (cfg) CFG = cfg;
-        applyLanguage();
-      })
-      .catch(err => {
-        console.warn('[CONFIG ERROR]', err);
-      });
-
-    // メイン画面を表示
-    await route();
-
-  } catch (e) {
-    console.error('[BOOT ERROR]', e);
-
-    try {
-      landing();
-    } catch (landingError) {
-      console.error('[LANDING ERROR]', landingError);
-    }
-  }
+  try { ME = await api('/api/me'); } catch (e) { return landing(); }
+  CFG = await fetch('/api/config').then(r => r.json()).catch(() => CFG); layout(); connect(); route();
 }
-
 window.addEventListener('hashchange', route);
 boot();
