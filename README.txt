@@ -14,7 +14,7 @@ node --disable-warning=ExperimentalWarning server.js
 または start.bat をダブルクリックしてください。
 
 サイト:
-http://localhost:3000
+https://tamari-pi.vercel.app/
 
 管理:
 http://localhost:3000/admin
